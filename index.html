@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fuse Bead Pattern Creator</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Fuse Bead Pattern Creator</h1>
+        
+        <div class="upload-section">
+            <input type="file" id="imageUpload" accept="image/*">
+            <label for="imageUpload" class="upload-btn">Upload Image</label>
+        </div>
+
+        <div class="controls" id="controls" style="display: none;">
+            <div class="control-group">
+                <label for="gridSize">Grid Size (beads):</label>
+                <input type="range" id="gridSize" min="10" max="90" value="30" step="1">
+                <span id="gridSizeValue">30×30</span>
+                <small id="boardInfo">(1×1 board)</small>
+            </div>
+        </div>
+
+        <div class="canvas-container" id="canvasContainer" style="display: none;">
+            <canvas id="previewCanvas"></canvas>
+        </div>
+
+        <div class="actions" id="actions" style="display: none;">
+            <button id="printBtn" class="action-btn">Print Pattern</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
