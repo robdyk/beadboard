@@ -17,6 +17,19 @@
             <label for="imageUpload" class="upload-btn">Upload Image</label>
         </div>
 
+        <div class="recent-section" id="recentSection" style="display: none;">
+            <h3 class="recent-title">Recent Images</h3>
+            <div class="recent-tray" id="recentTray"></div>
+        </div>
+
+        <div class="poke-repo" id="pokeRepoSection">
+            <button class="poke-repo-toggle" id="pokeRepoToggle">▸ Browse Pokémon</button>
+            <div class="poke-repo-body" id="pokeRepoBody" style="display: none;">
+                <input type="text" id="pokeRepoSearch" class="poke-repo-search" placeholder="Search by name or number...">
+                <div class="poke-repo-grid" id="pokeRepoGrid"></div>
+            </div>
+        </div>
+
         <div class="controls" id="controls" style="display: none;">
             <div class="control-group">
                 <label for="gridSize">Grid Size (beads):</label>
@@ -36,5 +49,7 @@
     </div>
 
     <script src="app.js"></script>
+    <script src="pokemon-repo.js"></script>
+    <script>initPokemonRepo();</script>
 </body>
 </html>

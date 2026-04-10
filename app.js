@@ -11,6 +11,10 @@ const printBtn = document.getElementById('printBtn');
 
 let uploadedImage = null;
 
+function setUploadedImage(img) {
+    uploadedImage = img;
+}
+
 // Standard Perler/Hama bead colors (RGB values)
 const BEAD_COLORS = [
     { name: 'White', r: 255, g: 255, b: 255 },
@@ -36,20 +40,25 @@ const BEAD_COLORS = [
 function findClosestBeadColor(r, g, b) {
     let minDistance = Infinity;
     let closestColor = BEAD_COLORS[0];
-    
+
     for (const color of BEAD_COLORS) {
+        // Weighted Euclidean distance in RGB — approximates human color perception
+        const rMean = (r + color.r) / 2;
+        const dr = r - color.r;
+        const dg = g - color.g;
+        const db = b - color.b;
         const distance = Math.sqrt(
-            Math.pow(r - color.r, 2) +
-            Math.pow(g - color.g, 2) +
-            Math.pow(b - color.b, 2)
+            (2 + rMean / 256) * dr * dr +
+            4 * dg * dg +
+            (2 + (255 - rMean) / 256) * db * db
         );
-        
+
         if (distance < minDistance) {
             minDistance = distance;
             closestColor = color;
         }
     }
-    
+
     return closestColor;
 }
 
@@ -154,6 +163,89 @@ function applyEdgeDetection(imageData, width, height) {
     return new ImageData(output, width, height);
 }
 
+const recentSection = document.getElementById('recentSection');
+const recentTray = document.getElementById('recentTray');
+
+const RECENT_KEY = 'beadboard_recent';
+const MAX_RECENT = 8;
+
+function loadRecent() {
+    try {
+        return JSON.parse(localStorage.getItem(RECENT_KEY)) || [];
+    } catch { return []; }
+}
+
+function saveRecent(list) {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+}
+
+function addToRecent(dataUrl, name) {
+    let list = loadRecent();
+    // Remove duplicate if same name exists
+    list = list.filter(item => item.name !== name);
+    list.unshift({ dataUrl, name });
+    if (list.length > MAX_RECENT) list = list.slice(0, MAX_RECENT);
+    saveRecent(list);
+    renderRecentTray();
+}
+
+function removeFromRecent(name) {
+    let list = loadRecent().filter(item => item.name !== name);
+    saveRecent(list);
+    renderRecentTray();
+}
+
+function renderRecentTray() {
+    const list = loadRecent();
+    if (list.length === 0) {
+        recentSection.style.display = 'none';
+        return;
+    }
+    recentSection.style.display = 'block';
+    recentTray.innerHTML = '';
+    list.forEach(item => {
+        const thumb = document.createElement('div');
+        thumb.className = 'recent-thumb';
+        thumb.title = item.name;
+
+        const img = document.createElement('img');
+        img.src = item.dataUrl;
+        img.alt = item.name;
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'remove-btn';
+        removeBtn.textContent = '×';
+        removeBtn.title = 'Remove';
+        removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeFromRecent(item.name);
+        });
+
+        thumb.appendChild(img);
+        thumb.appendChild(removeBtn);
+        thumb.addEventListener('click', (e) => loadFromRecent(item, e.currentTarget));
+        recentTray.appendChild(thumb);
+    });
+}
+
+function loadFromRecent(item, thumbEl) {
+    recentTray.querySelectorAll('.recent-thumb').forEach(t => t.classList.remove('active'));
+    thumbEl.classList.add('active');
+
+    const img = new Image();
+    img.onload = function() {
+        uploadedImage = img;
+        controls.style.display = 'block';
+        canvasContainer.style.display = 'block';
+        actions.style.display = 'block';
+        updatePattern();
+    };
+    img.src = item.dataUrl;
+}
+
+// Init tray on load
+renderRecentTray();
+
 imageUpload.addEventListener('change', handleImageUpload);
 gridSizeInput.addEventListener('input', updatePattern);
 printBtn.addEventListener('click', printPattern);
@@ -164,15 +256,17 @@ function handleImageUpload(e) {
 
     const reader = new FileReader();
     reader.onload = function(event) {
+        const dataUrl = event.target.result;
         const img = new Image();
         img.onload = function() {
             uploadedImage = img;
             controls.style.display = 'block';
             canvasContainer.style.display = 'block';
             actions.style.display = 'block';
+            addToRecent(dataUrl, file.name);
             updatePattern();
         };
-        img.src = event.target.result;
+        img.src = dataUrl;
     };
     reader.readAsDataURL(file);
 }
@@ -181,73 +275,83 @@ function updatePattern() {
     if (!uploadedImage) return;
 
     const gridSize = parseInt(gridSizeInput.value);
-    gridSizeValue.textContent = `${gridSize}×${gridSize}`;
-    
-    // Update board info
-    if (gridSize <= 30) {
+
+    // Preserve aspect ratio — calculate grid dimensions based on image proportions
+    const imgAspect = (uploadedImage.naturalWidth || uploadedImage.width) / (uploadedImage.naturalHeight || uploadedImage.height);
+    let gridW, gridH;
+    if (imgAspect >= 1) {
+        gridW = gridSize;
+        gridH = Math.max(1, Math.round(gridSize / imgAspect));
+    } else {
+        gridH = gridSize;
+        gridW = Math.max(1, Math.round(gridSize * imgAspect));
+    }
+
+    gridSizeValue.textContent = `${gridW}×${gridH}`;
+
+    // Update board info based on largest dimension
+    const maxDim = Math.max(gridW, gridH);
+    if (maxDim <= 30) {
         boardInfo.textContent = '(1×1 board)';
-    } else if (gridSize <= 60) {
+    } else if (maxDim <= 60) {
         boardInfo.textContent = '(2×2 boards)';
     } else {
         boardInfo.textContent = '(3×3 boards)';
     }
 
-    // Calculate canvas size for 15cm at 96 DPI (standard screen resolution)
-    // 15cm = ~5.9 inches = ~567 pixels at 96 DPI
+    // Calculate canvas size — keep beads square
     const maxSizePx = 567;
-    const beadSize = Math.floor(maxSizePx / gridSize);
-    const canvasSize = beadSize * gridSize;
+    const beadSize = Math.floor(maxSizePx / Math.max(gridW, gridH));
+    const canvasW = beadSize * gridW;
+    const canvasH = beadSize * gridH;
 
-    previewCanvas.width = canvasSize;
-    previewCanvas.height = canvasSize;
+    previewCanvas.width = canvasW;
+    previewCanvas.height = canvasH;
 
     // Create temporary canvas for image processing
     const tempCanvas = document.createElement('canvas');
     const tempCtx = tempCanvas.getContext('2d');
-    tempCanvas.width = gridSize;
-    tempCanvas.height = gridSize;
+    tempCanvas.width = gridW;
+    tempCanvas.height = gridH;
 
     // Draw full image first to detect content bounds
     const detectCanvas = document.createElement('canvas');
     const detectCtx = detectCanvas.getContext('2d');
-    detectCanvas.width = uploadedImage.width;
-    detectCanvas.height = uploadedImage.height;
+    detectCanvas.width = uploadedImage.naturalWidth || uploadedImage.width;
+    detectCanvas.height = uploadedImage.naturalHeight || uploadedImage.height;
     detectCtx.drawImage(uploadedImage, 0, 0);
-    
+
     // Find content bounds (non-white pixels)
-    const bounds = findContentBounds(detectCtx, uploadedImage.width, uploadedImage.height);
-    
-    // Draw cropped content to fill the entire grid
+    const bounds = findContentBounds(detectCtx, detectCanvas.width, detectCanvas.height);
+
+    // Draw cropped content preserving aspect ratio into the grid
     tempCtx.fillStyle = '#ffffff';
-    tempCtx.fillRect(0, 0, gridSize, gridSize);
+    tempCtx.fillRect(0, 0, gridW, gridH);
     tempCtx.drawImage(
         uploadedImage,
         bounds.left, bounds.top, bounds.width, bounds.height,
-        0, 0, gridSize, gridSize
+        0, 0, gridW, gridH
     );
-    let imageData = tempCtx.getImageData(0, 0, gridSize, gridSize);
-    
+    let imageData = tempCtx.getImageData(0, 0, gridW, gridH);
+
     // Apply edge detection for sharp contours
-    imageData = applyEdgeDetection(imageData, gridSize, gridSize);
+    imageData = applyEdgeDetection(imageData, gridW, gridH);
 
     // Draw pixelated pattern with grid using bead colors
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvasSize, canvasSize);
+    ctx.fillRect(0, 0, canvasW, canvasH);
 
-    for (let y = 0; y < gridSize; y++) {
-        for (let x = 0; x < gridSize; x++) {
-            const i = (y * gridSize + x) * 4;
+    for (let y = 0; y < gridH; y++) {
+        for (let x = 0; x < gridW; x++) {
+            const i = (y * gridW + x) * 4;
             const r = imageData.data[i];
             const g = imageData.data[i + 1];
             const b = imageData.data[i + 2];
 
-            // Map to closest bead color
-            const beadColor = findClosestBeadColor(r, g, b);
-            ctx.fillStyle = `rgb(${beadColor.r}, ${beadColor.g}, ${beadColor.b})`;
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
             ctx.fillRect(x * beadSize, y * beadSize, beadSize, beadSize);
 
-            // Draw grid lines
-            ctx.strokeStyle = '#cccccc';
+            ctx.strokeStyle = 'rgba(0,0,0,0.15)';
             ctx.lineWidth = 1;
             ctx.strokeRect(x * beadSize, y * beadSize, beadSize, beadSize);
         }
@@ -256,47 +360,59 @@ function updatePattern() {
 
 function printPattern() {
     const gridSize = parseInt(gridSizeInput.value);
-    
-    // Determine board configuration
+
+    // Preserve aspect ratio for print too
+    const imgAspect = (uploadedImage.naturalWidth || uploadedImage.width) / (uploadedImage.naturalHeight || uploadedImage.height);
+    let gridW, gridH;
+    if (imgAspect >= 1) {
+        gridW = gridSize;
+        gridH = Math.max(1, Math.round(gridSize / imgAspect));
+    } else {
+        gridH = gridSize;
+        gridW = Math.max(1, Math.round(gridSize * imgAspect));
+    }
+
+    // Determine board configuration based on largest dimension
+    const maxDim = Math.max(gridW, gridH);
     let boardsPerSide;
-    if (gridSize <= 30) {
+    if (maxDim <= 30) {
         boardsPerSide = 1;
-    } else if (gridSize <= 60) {
+    } else if (maxDim <= 60) {
         boardsPerSide = 2;
     } else {
         boardsPerSide = 3;
     }
-    
-    const beadsPerBoard = 30; // Standard board is always 30×30
-    const printSizePx = Math.round((15 / 2.54) * 300); // 15cm at 300 DPI = 1772px
+
+    const beadsPerBoard = 30;
+    const printSizePx = Math.round((15 / 2.54) * 300);
     const beadSize = printSizePx / beadsPerBoard;
 
     // Create full pattern canvas
     const fullCanvas = document.createElement('canvas');
     const fullCtx = fullCanvas.getContext('2d');
-    fullCanvas.width = gridSize;
-    fullCanvas.height = gridSize;
+    fullCanvas.width = gridW;
+    fullCanvas.height = gridH;
 
     // Draw full image first to detect content bounds
     const detectCanvas = document.createElement('canvas');
     const detectCtx = detectCanvas.getContext('2d');
-    detectCanvas.width = uploadedImage.width;
-    detectCanvas.height = uploadedImage.height;
+    detectCanvas.width = uploadedImage.naturalWidth || uploadedImage.width;
+    detectCanvas.height = uploadedImage.naturalHeight || uploadedImage.height;
     detectCtx.drawImage(uploadedImage, 0, 0);
-    
-    const bounds = findContentBounds(detectCtx, uploadedImage.width, uploadedImage.height);
-    
+
+    const bounds = findContentBounds(detectCtx, detectCanvas.width, detectCanvas.height);
+
     fullCtx.fillStyle = '#ffffff';
-    fullCtx.fillRect(0, 0, gridSize, gridSize);
+    fullCtx.fillRect(0, 0, gridW, gridH);
     fullCtx.drawImage(
         uploadedImage,
         bounds.left, bounds.top, bounds.width, bounds.height,
-        0, 0, gridSize, gridSize
+        0, 0, gridW, gridH
     );
-    let imageData = fullCtx.getImageData(0, 0, gridSize, gridSize);
-    
+    let imageData = fullCtx.getImageData(0, 0, gridW, gridH);
+
     // Apply edge detection
-    imageData = applyEdgeDetection(imageData, gridSize, gridSize);
+    imageData = applyEdgeDetection(imageData, gridW, gridH);
 
     // Hide original UI elements
     const originalDisplay = {
@@ -331,25 +447,24 @@ function printPattern() {
             // Calculate which beads go on this board
             const startX = boardX * beadsPerBoard;
             const startY = boardY * beadsPerBoard;
-            const endX = Math.min(startX + beadsPerBoard, gridSize);
-            const endY = Math.min(startY + beadsPerBoard, gridSize);
+            const endX = Math.min(startX + beadsPerBoard, gridW);
+            const endY = Math.min(startY + beadsPerBoard, gridH);
 
             // Draw beads for this board
             for (let y = startY; y < endY; y++) {
                 for (let x = startX; x < endX; x++) {
-                    const i = (y * gridSize + x) * 4;
+                    const i = (y * gridW + x) * 4;
                     const r = imageData.data[i];
                     const g = imageData.data[i + 1];
                     const b = imageData.data[i + 2];
 
-                    const beadColor = findClosestBeadColor(r, g, b);
-                    pageCtx.fillStyle = `rgb(${beadColor.r}, ${beadColor.g}, ${beadColor.b})`;
-                    
+                    pageCtx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+
                     const drawX = (x - startX) * beadSize;
                     const drawY = (y - startY) * beadSize;
                     pageCtx.fillRect(drawX, drawY, beadSize, beadSize);
 
-                    pageCtx.strokeStyle = '#999999';
+                    pageCtx.strokeStyle = 'rgba(0,0,0,0.15)';
                     pageCtx.lineWidth = 2;
                     pageCtx.strokeRect(drawX, drawY, beadSize, beadSize);
                 }
